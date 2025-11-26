@@ -1,0 +1,15 @@
+{
+  "channels": [
+    {
+      "id": "Channel_id",
+      "name": "Channel Name"
+    }
+  ],
+  "subscribers": [
+    "subscribers@xxx.com"
+  ],
+  "email": {
+    "from": "YouTube Monitor <xxx@xxx.com>"
+  },
+  "check_hours": 1
+}
