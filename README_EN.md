@@ -279,7 +279,7 @@ If you have questions or suggestions, please submit them on the [Issues](../../i
 
 ## 📄 License
 
-MIT License - Free to use and modify
+MIT License - Free to use and modify 
 
 ---
 

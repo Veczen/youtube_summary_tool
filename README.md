@@ -25,7 +25,7 @@
 
 ### 第二步：部署到GitHub（2分钟）
 
-1. **Fork本仓库** - 点击右上角Fork按钮
+1. **Fork本仓库** - 点击右上角Fork按钮 
 
 2. **配置Secrets** - 进入你的仓库 `Settings` → `Secrets and variables` → `Actions`，添加以下5个密钥：
    
