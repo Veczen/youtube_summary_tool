@@ -10,6 +10,20 @@ class YouTubeMonitor:
     def __init__(self):
         self.config = self.load_json('config.json')
         self.last_videos = self.load_json('last_videos.json')
+
+        # 从环境变量覆盖邮件配置（如果存在）
+        email_from = os.getenv('EMAIL_FROM')
+        if email_from:
+            if 'email' not in self.config:
+                self.config['email'] = {}
+            self.config['email']['from'] = email_from
+
+        # 从环境变量获取订阅者邮箱（如果存在）
+        subscribers = os.getenv('EMAIL_SUBSCRIBERS')
+        if subscribers:
+            # 支持多个邮箱，用逗号分隔
+            self.config['subscribers'] = [email.strip() for email in subscribers.split(',')]
+
         self.youtube = build('youtube', 'v3', developerKey=os.getenv('YOUTUBE_API_KEY'))
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
         self.model = genai.GenerativeModel('gemini-2.5-flash')

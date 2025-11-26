@@ -25,12 +25,18 @@
 
 1. **Fork本仓库** - 点击右上角Fork按钮
 
-2. **配置Secrets** - 进入你的仓库 `Settings` → `Secrets and variables` → `Actions`
-   - 添加 `YOUTUBE_API_KEY`
-   - 添加 `GEMINI_API_KEY`
-   - 添加 `RESEND_API_KEY`
+2. **配置Secrets** - 进入你的仓库 `Settings` → `Secrets and variables` → `Actions`，添加以下5个密钥：
+   
+   **API密钥（必需）：**
+   - `YOUTUBE_API_KEY` - 你的YouTube API密钥
+   - `GEMINI_API_KEY` - 你的Gemini API密钥
+   - `RESEND_API_KEY` - 你的Resend API密钥
+   
+   **邮件配置（必需）：**
+   - `EMAIL_FROM` - 发件人地址，格式：`YouTube Monitor <onboarding@resend.dev>`
+   - `EMAIL_SUBSCRIBERS` - 订阅者邮箱，多个邮箱用逗号分隔，如：`user1@gmail.com,user2@outlook.com`
 
-3. **修改配置** - 编辑 `config.json` 文件：
+3. **修改配置** - 编辑 `config.json` 文件（仅配置要监控的频道）：
 
 ```json
 {
@@ -40,12 +46,6 @@
       "name": "Google Developers"
     }
   ],
-  "subscribers": [
-    "your-email@example.com"
-  ],
-  "email": {
-    "from": "YouTube Monitor <onboarding@resend.dev>"
-  },
   "check_hours": 24
 }
 ```
@@ -54,9 +54,10 @@
 - 访问YouTube频道页面，URL中的 `UC_x5XG1OV2P6uZZ5FSM9Ttw` 就是频道ID
 - 或右键查看页面源代码，搜索 `"channelId"`
 
-**Resend邮件配置：**
-- 测试：使用 `onboarding@resend.dev`（仅能发给你在Resend验证的邮箱）
-- 生产：配置自己的域名（免费验证）
+**邮件配置说明：**
+- ⚠️ **重要**：邮件配置（发件人和订阅者）已移至 GitHub Secrets
+- 📖 详细配置方法请查看：[GitHub Secrets 配置指南](./SECRETS_GUIDE.md)
+- 不要在 `config.json` 中配置邮箱信息
 
 4. **启用Actions** - 进入 `Actions` 标签页 → 启用工作流 → 完成！
 
@@ -71,11 +72,20 @@
 | `channels` | Array | ✅ | 要监控的YouTube频道列表 |
 | `channels[].id` | String | ✅ | YouTube频道ID（以UC开头） |
 | `channels[].name` | String | ✅ | 频道显示名称（用于邮件标题） |
-| `subscribers` | Array | ✅ | 接收邮件的邮箱列表 |
-| `email.from` | String | ✅ | 发件人地址（格式：`名称 <邮箱>`） |
 | `check_hours` | Number | ❌ | 检查最近多少小时的视频（默认24） |
 
-### 支持多频道多订阅者
+**注意**: `subscribers` 和 `email.from` 已移至 GitHub Secrets 配置
+
+### GitHub Secrets 配置
+
+| Secret名称 | 说明 | 示例 |
+|-----------|------|------|
+| `EMAIL_FROM` | 发件人地址 | `YouTube Monitor <onboarding@resend.dev>` |
+| `EMAIL_SUBSCRIBERS` | 订阅者邮箱（逗号分隔） | `user1@gmail.com,user2@outlook.com` |
+
+详细配置方法：📖 [GitHub Secrets 配置指南](./SECRETS_GUIDE.md)
+
+### 支持多频道配置
 
 ```json
 {
@@ -84,14 +94,6 @@
     {"id": "UCXuqSBlHAE6Xw-yeJA0Tunw", "name": "Linus Tech Tips"},
     {"id": "UCsooa4yRKGN_zEE8iknghZA", "name": "TED-Ed"}
   ],
-  "subscribers": [
-    "user1@gmail.com",
-    "user2@outlook.com",
-    "team@company.com"
-  ],
-  "email": {
-    "from": "YouTube Bot <noreply@yourdomain.com>"
-  },
   "check_hours": 24
 }
 ```
@@ -111,6 +113,8 @@ pip install -r requirements.txt
 $env:YOUTUBE_API_KEY="你的API密钥"
 $env:GEMINI_API_KEY="你的API密钥"
 $env:RESEND_API_KEY="你的API密钥"
+$env:EMAIL_FROM="YouTube Monitor <onboarding@resend.dev>"
+$env:EMAIL_SUBSCRIBERS="your-email@example.com"
 ```
 
 **Linux/Mac:**
@@ -118,6 +122,13 @@ $env:RESEND_API_KEY="你的API密钥"
 export YOUTUBE_API_KEY="你的API密钥"
 export GEMINI_API_KEY="你的API密钥"
 export RESEND_API_KEY="你的API密钥"
+export EMAIL_FROM="YouTube Monitor <onboarding@resend.dev>"
+export EMAIL_SUBSCRIBERS="your-email@example.com"
+```
+
+**多个订阅者：**
+```powershell
+$env:EMAIL_SUBSCRIBERS="user1@gmail.com,user2@outlook.com"
 ```
 
 ### 验证配置（推荐）

@@ -1,15 +1,17 @@
 {
   "channels": [
     {
-      "id": "Channel_id",
-      "name": "Channel Name"
+      "id": "UCFhJ8ZFg9W4kLwFTBBNIjOw",
+      "name": "娜娜说美股"
+    },
+    {
+      "id": "UCbI_tAz8drA95Qua5lMHiSg",
+      "name": "幂笈"
+    },
+    {
+      "id": "UCWgWYZjNo42YLvx6Arb6mcg",
+      "name": "美股Alpha姐"
     }
   ],
-  "subscribers": [
-    "subscribers@xxx.com"
-  ],
-  "email": {
-    "from": "YouTube Monitor <xxx@xxx.com>"
-  },
   "check_hours": 1
 }
