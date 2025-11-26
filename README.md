@@ -1,5 +1,7 @@
 # YouTube 视频监控系统
 
+**中文** | [English](./README_EN.md)
+
 自动监控YouTube频道更新，使用AI生成中文视频总结并通过邮件通知订阅者。
 
 ## ✨ 核心功能
