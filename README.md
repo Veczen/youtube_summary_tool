@@ -137,7 +137,7 @@ $env:EMAIL_SUBSCRIBERS="user1@gmail.com,user2@outlook.com"
 python test_config.py
 ```
 
-会验证所有API密钥和配置文件是否正确。
+会验证所有API密钥和配置文件是否正确
 
 ### 运行程序
 
