@@ -213,6 +213,19 @@ A:
 </details>
 
 <details>
+<summary><b>Q: GitHub Actions 提示权限错误 (403)?</b></summary>
+
+A:
+这是因为工作流没有写入权限。已在最新版本中修复，如果仍有问题：
+
+1. 进入仓库 `Settings` → `Actions` → `General`
+2. 找到 "Workflow permissions"
+3. 选择 "Read and write permissions"
+4. 保存设置
+5. 重新运行工作流
+</details>
+
+<details>
 <summary><b>Q: 收不到邮件？</b></summary>
 
 A:
