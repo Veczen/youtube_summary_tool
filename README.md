@@ -15,19 +15,22 @@
 
 ## 🚀 5分钟快速部署
 
-### 第一步：获取API密钥（3分钟）
+### 第一步：获取API密钥（5分钟）
 
 | 服务 | 获取地址 | 说明 | 免费配额 |
 |------|---------|------|----------|
 | **YouTube API** | [Google Cloud Console](https://console.cloud.google.com/) | 启用 YouTube Data API v3 → 创建API密钥 | 10,000单位/天 |
 | **Gemini AI** | [Google AI Studio](https://makersuite.google.com/app/apikey) | 点击"创建API密钥" | 15请求/分钟 |
 | **Resend** | [resend.com](https://resend.com/api-keys) | 注册账户 → 创建API密钥 | 100封/天 |
+| **Azure Speech** | [Azure Portal](https://portal.azure.com/) | 创建"语音服务"资源 | 5小时/月 ⚠️ |
+
+⚠️ **Azure Speech（可选）**: 仅在视频禁用字幕时使用，会下载音频转文本。大部分视频有字幕，可以先不配置。
 
 ### 第二步：部署到GitHub（2分钟）
 
 1. **Fork本仓库** - 点击右上角Fork按钮 
 
-2. **配置Secrets** - 进入你的仓库 `Settings` → `Secrets and variables` → `Actions`，添加以下5个密钥：
+2. **配置Secrets** - 进入你的仓库 `Settings` → `Secrets and variables` → `Actions`，添加以下密钥：
    
    **API密钥（必需）：**
    - `YOUTUBE_API_KEY` - 你的YouTube API密钥
@@ -37,6 +40,10 @@
    **邮件配置（必需）：**
    - `EMAIL_FROM` - 发件人地址，格式：`YouTube Monitor <onboarding@resend.dev>`
    - `EMAIL_SUBSCRIBERS` - 订阅者邮箱，多个邮箱用逗号分隔，如：`user1@gmail.com,user2@outlook.com`
+   
+   **Azure语音服务（可选，仅在视频无字幕时使用）：**
+   - `AZURE_SPEECH_KEY` - Azure语音服务密钥
+   - `AZURE_SPEECH_REGION` - Azure服务区域（如：`eastus`）
 
 3. **修改配置** - 编辑 `config.json` 文件（仅配置要监控的频道）：
 
@@ -117,6 +124,10 @@ $env:GEMINI_API_KEY="你的API密钥"
 $env:RESEND_API_KEY="你的API密钥"
 $env:EMAIL_FROM="YouTube Monitor <onboarding@resend.dev>"
 $env:EMAIL_SUBSCRIBERS="your-email@example.com"
+
+# 可选：Azure语音服务（仅在视频无字幕时使用）
+$env:AZURE_SPEECH_KEY="你的Azure密钥"
+$env:AZURE_SPEECH_REGION="eastus"
 ```
 
 **Linux/Mac:**
@@ -126,6 +137,10 @@ export GEMINI_API_KEY="你的API密钥"
 export RESEND_API_KEY="你的API密钥"
 export EMAIL_FROM="YouTube Monitor <onboarding@resend.dev>"
 export EMAIL_SUBSCRIBERS="your-email@example.com"
+
+# 可选：Azure语音服务
+export AZURE_SPEECH_KEY="你的Azure密钥"
+export AZURE_SPEECH_REGION="eastus"
 ```
 
 **多个订阅者：**
@@ -133,13 +148,6 @@ export EMAIL_SUBSCRIBERS="your-email@example.com"
 $env:EMAIL_SUBSCRIBERS="user1@gmail.com,user2@outlook.com"
 ```
 
-### 验证配置（推荐）
-
-```bash
-python test_config.py
-```
-
-会验证所有API密钥和配置文件是否正确
 
 ### 运行程序
 
@@ -168,7 +176,10 @@ GitHub Actions (每小时触发)
     ↓
 检查YouTube频道新视频
     ↓
-自动获取视频原始语言字幕（英/日/韩/中等）
+尝试获取视频字幕（优先原始语言）
+    ↓
+字幕可用？ ─── 否 ──→ 下载音频 → Azure Speech转文本
+    ↓ 是
     ↓
 Gemini AI生成中文总结
     ↓
@@ -181,6 +192,7 @@ Gemini AI生成中文总结
 
 **特色功能：**
 - 🌐 **智能语言检测**: 自动识别视频原始语言，优先获取手动字幕
+- 🔊 **音频转录备份**: 当字幕不可用时，自动下载音频并使用Azure Speech转文本
 - 🎨 **美观邮件**: HTML格式，响应式设计，移动端友好
 - 💾 **状态持久化**: 记录到Git仓库，避免重复通知
 - 🔄 **自动去重**: 已处理的视频不会重复发送
@@ -198,7 +210,10 @@ Gemini AI生成中文总结
 ## ⚠️ 重要提示
 
 - ✅ **首次运行**: 检查最近24小时视频，之后仅检测新视频
-- ✅ **字幕支持**: 自动获取原始语言字幕（英/日/韩/西/中等）
+- ✅ **字幕优先**: 自动获取原始语言字幕（英/日/韩/西/中等）
+- 🔊 **音频备份**: 视频禁用字幕时，自动下载音频转文本（需配置Azure Speech）
+- ⚠️ **Azure可选**: 大部分YouTube视频都有字幕，Azure Speech仅作为备选方案
+- 💰 **成本控制**: Azure免费额度每月5小时，如果监控的频道都有字幕，可以不配置
 - ✅ **邮件配额**: Resend免费版每天100封，足够个人使用
 - ⚠️ **测试邮箱**: 使用`onboarding@resend.dev`只能发给验证的邮箱
 - ⚠️ **API限制**: YouTube API每天10,000单位，监控100个频道无压力

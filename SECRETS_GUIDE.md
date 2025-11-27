@@ -1,136 +1,100 @@
-# GitHub Secrets 配置指南
+# 配置密钥指南
 
-## 为什么使用 GitHub Secrets？
+本项目需要在GitHub仓库的Settings -> Secrets and variables -> Actions中配置以下密钥：
 
-为了保护隐私和安全，邮箱地址等敏感信息不应该直接写在代码仓库中。使用 GitHub Secrets 可以：
-- ✅ 保护个人隐私（邮箱不会暴露在公开仓库）
-- ✅ 每个人可以使用自己的配置（Fork后设置自己的邮箱）
-- ✅ 更安全（API密钥和邮箱配置都加密存储）
+## 必需的密钥
 
-## 必需的 GitHub Secrets
+### 1. YOUTUBE_API_KEY
+YouTube Data API v3 密钥
 
-进入你的仓库 `Settings` → `Secrets and variables` → `Actions` → `New repository secret`
+**获取方式：**
+1. 访问 [Google Cloud Console](https://console.cloud.google.com/)
+2. 创建新项目或选择现有项目
+3. 启用 "YouTube Data API v3"
+4. 在"凭据"中创建API密钥
+5. 复制API密钥
 
-### 1. API 密钥（3个）
+### 2. GEMINI_API_KEY
+Google Gemini AI API 密钥
 
-| Secret名称 | 说明 | 示例 |
-|-----------|------|------|
-| `YOUTUBE_API_KEY` | YouTube Data API v3 密钥 | `AIzaSyC...` |
-| `GEMINI_API_KEY` | Google Gemini AI 密钥 | `AIzaSyD...` |
-| `RESEND_API_KEY` | Resend 邮件服务密钥 | `re_abc...` |
+**获取方式：**
+1. 访问 [Google AI Studio](https://makersuite.google.com/app/apikey)
+2. 创建API密钥
+3. 复制密钥
 
-### 2. 邮件配置（2个）
+### 3. RESEND_API_KEY
+Resend邮件服务API密钥
 
-| Secret名称 | 说明 | 示例 |
-|-----------|------|------|
-| `EMAIL_FROM` | 发件人地址 | `YouTube Monitor <onboarding@resend.dev>` |
-| `EMAIL_SUBSCRIBERS` | 订阅者邮箱列表 | `user1@gmail.com,user2@outlook.com` |
+**获取方式：**
+1. 访问 [Resend](https://resend.com/)
+2. 注册账号（免费额度：每月3000封邮件）
+3. 在Dashboard中创建API密钥
+4. 复制密钥
 
-## 详细设置步骤
+### 4. AZURE_SPEECH_KEY
+Azure 语音服务密钥
 
-### EMAIL_FROM（发件人配置）
+**获取方式：**
+1. 访问 [Azure Portal](https://portal.azure.com/)
+2. 创建"语音服务"资源（免费层：每月5小时音频转录）
+3. 在"密钥和终结点"中复制密钥1或密钥2
 
-**格式**: `名称 <邮箱地址>`
+### 5. AZURE_SPEECH_REGION
+Azure 语音服务区域
 
-**示例**:
+**获取方式：**
+- 在Azure语音服务的"密钥和终结点"页面查看"位置/区域"
+- 例如：`eastus`、`westus2`、`eastasia`等
+
+### 6. EMAIL_FROM
+发送邮件的邮箱地址
+
+**格式：**
 ```
-YouTube Monitor <onboarding@resend.dev>
-```
-
-**注意事项**:
-- 测试阶段使用 `onboarding@resend.dev`（Resend提供的测试邮箱）
-- 使用测试邮箱时，只能发送到你在Resend账户中验证的邮箱
-- 生产环境建议配置自己的域名（免费验证）
-
-**如何验证自己的域名**:
-1. 登录 [Resend](https://resend.com/)
-2. 进入 Domains → Add Domain
-3. 按提示添加DNS记录
-4. 验证通过后使用：`YouTube Bot <noreply@yourdomain.com>`
-
-### EMAIL_SUBSCRIBERS（订阅者邮箱）
-
-**格式**: 多个邮箱用英文逗号分隔，不要有空格（系统会自动处理空格）
-
-**示例**:
-```
-user1@gmail.com,user2@outlook.com,team@company.com
+Your Name <noreply@yourdomain.com>
 ```
 
-**支持的格式**:
-- ✅ `email1@domain.com,email2@domain.com`
-- ✅ `email1@domain.com, email2@domain.com`（有空格也可以）
-- ✅ 单个邮箱：`user@domain.com`
+**注意：**
+- 需要在Resend中验证此域名或使用Resend提供的测试域名
+- 免费用户可以使用 `onboarding@resend.dev`
 
-## 本地测试配置
+### 7. EMAIL_SUBSCRIBERS
+接收邮件的订阅者邮箱（多个邮箱用逗号分隔）
 
-如果要在本地测试，设置环境变量：
-
-**Windows PowerShell:**
-```powershell
-$env:YOUTUBE_API_KEY="your_youtube_api_key"
-$env:GEMINI_API_KEY="your_gemini_api_key"
-$env:RESEND_API_KEY="your_resend_api_key"
-$env:EMAIL_FROM="YouTube Monitor <onboarding@resend.dev>"
-$env:EMAIL_SUBSCRIBERS="your-email@example.com"
+**格式：**
+```
+user1@example.com,user2@example.com
 ```
 
-**Linux/Mac:**
-```bash
-export YOUTUBE_API_KEY="your_youtube_api_key"
-export GEMINI_API_KEY="your_gemini_api_key"
-export RESEND_API_KEY="your_resend_api_key"
-export EMAIL_FROM="YouTube Monitor <onboarding@resend.dev>"
-export EMAIL_SUBSCRIBERS="your-email@example.com"
+或单个邮箱：
+```
+user@example.com
 ```
 
-## 配置优先级
+## 配置步骤
 
-系统按以下优先级读取配置：
+1. 进入GitHub仓库
+2. 点击 `Settings` -> `Secrets and variables` -> `Actions`
+3. 点击 `New repository secret`
+4. 输入密钥名称和值
+5. 点击 `Add secret`
+6. 重复以上步骤添加所有7个密钥
 
-1. **环境变量**（最高优先级）
-   - `EMAIL_FROM` → 覆盖 config.json 中的 `email.from`
-   - `EMAIL_SUBSCRIBERS` → 覆盖 config.json 中的 `subscribers`
+## 成本说明
 
-2. **config.json** 文件（备用）
-   - 如果没有设置环境变量，会从文件读取
-   - 适合本地开发测试
+所有服务都提供免费额度，足够个人使用：
 
-## 常见问题
+- **YouTube Data API**: 每天免费10,000配额单位（查询视频信息消耗很少）
+- **Gemini API**: 免费额度每分钟15次请求
+- **Resend**: 每月免费3,000封邮件
+- **Azure Speech**: 每月免费5小时音频转录
+- **GitHub Actions**: 公共仓库免费无限使用
 
-**Q: 为什么我的邮件发送失败？**
+## 验证配置
 
-A: 检查以下几点：
-1. `RESEND_API_KEY` 是否正确
-2. `EMAIL_FROM` 格式是否正确
-3. 使用 `onboarding@resend.dev` 时，确保收件人邮箱已在Resend验证
-4. 检查是否超过Resend免费配额（100封/天）
-
-**Q: 如何验证配置是否正确？**
-
-A: 
-1. 在 GitHub Actions 中手动触发一次工作流
-2. 查看运行日志，检查是否有错误信息
-3. 确认收件箱是否收到邮件
-
-**Q: 多个人Fork后如何各自配置？**
-
-A: 
-1. 每个人Fork后，在自己的仓库设置自己的Secrets
-2. 修改 `config.json` 中的 `channels` 配置（监控的频道）
-3. 不需要修改代码，只需要配置Secrets即可
-
-**Q: 可以添加多少个订阅者？**
-
-A: 理论上没有限制，但要注意：
-- Resend免费版每天100封邮件
-- 如果监控10个频道，每天有5个新视频，每封邮件发给10个订阅者 = 50封
-- 合理规划订阅者数量和监控频道数量
-
-## 安全建议
-
-- ✅ 永远不要将API密钥和邮箱配置提交到Git仓库
-- ✅ 使用GitHub Secrets管理所有敏感信息
-- ✅ 定期轮换API密钥
-- ✅ 不要在公开的Issue或PR中泄露配置信息
+配置完成后，可以手动触发工作流测试：
+1. 进入仓库的 `Actions` 标签
+2. 选择 `YouTube Monitor` 工作流
+3. 点击 `Run workflow` -> `Run workflow`
+4. 查看运行日志，确认是否配置正确
 

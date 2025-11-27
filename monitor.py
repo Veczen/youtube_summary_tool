@@ -1,10 +1,13 @@
 import json
 import os
+import tempfile
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 import google.generativeai as genai
 import resend
+import yt_dlp
+import azure.cognitiveservices.speech as speechsdk
 
 class YouTubeMonitor:
     def __init__(self):
@@ -125,15 +128,165 @@ class YouTubeMonitor:
             # 拼接字幕文本 - 使用属性访问而非字典访问
             full_text = ' '.join([item.text for item in transcript])
 
-            # 限制长度，避免超过API限制
+            # 限制长度，避免超过API限制（Gemini 2.5 Flash支持较大输入）
+            max_length = 100000  # 约100K字符，足够处理大部分视频
             return {
-                'text': full_text[:8000],
+                'text': full_text[:max_length],
                 'language': transcript_obj.language,
                 'language_code': transcript_obj.language_code
             }
         except Exception as e:
             print(f"  - 获取字幕失败: {e}")
             return None
+
+    def download_audio(self, video_id):
+        """下载YouTube视频的音频"""
+        try:
+            print(f"  - 尝试下载音频...")
+
+            # 创建临时目录
+            temp_dir = tempfile.mkdtemp()
+            output_path = os.path.join(temp_dir, f"{video_id}")
+
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': output_path,
+                'postprocessors': [{
+                    'key': 'FFmpegExtractAudio',
+                    'preferredcodec': 'wav',
+                    'preferredquality': '192',
+                }],
+                'quiet': True,
+                'no_warnings': True,
+            }
+
+            video_url = f"https://www.youtube.com/watch?v={video_id}"
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([video_url])
+
+            audio_file = f"{output_path}.wav"
+
+            if os.path.exists(audio_file):
+                print(f"  - 音频下载成功: {audio_file}")
+                return audio_file
+            else:
+                print(f"  - 音频文件未找到")
+                return None
+
+        except Exception as e:
+            print(f"  - 下载音频失败: {e}")
+            return None
+
+    def transcribe_audio_with_azure(self, audio_file):
+        """使用Azure Speech SDK将音频转为文本"""
+        try:
+            print(f"  - 使用Azure Speech API转录音频...")
+
+            # 从环境变量获取Azure配置
+            speech_key = os.getenv('AZURE_SPEECH_KEY')
+            speech_region = os.getenv('AZURE_SPEECH_REGION')
+
+            if not speech_key or not speech_region:
+                print(f"  - Azure Speech配置未找到")
+                return None
+
+            # 配置语音识别
+            speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
+
+            # 设置识别语言为中文和英文（自动检测）
+            auto_detect_source_language_config = speechsdk.languageconfig.AutoDetectSourceLanguageConfig(
+                languages=["zh-CN", "en-US"]
+            )
+
+            audio_config = speechsdk.audio.AudioConfig(filename=audio_file)
+
+            speech_recognizer = speechsdk.SpeechRecognizer(
+                speech_config=speech_config,
+                auto_detect_source_language_config=auto_detect_source_language_config,
+                audio_config=audio_config
+            )
+
+            # 收集识别结果
+            all_results = []
+            done = False
+
+            def stop_cb(evt):
+                nonlocal done
+                done = True
+
+            def recognized_cb(evt):
+                if evt.result.reason == speechsdk.ResultReason.RecognizedSpeech:
+                    all_results.append(evt.result.text)
+                    print(f"  - 已识别片段: {len(evt.result.text)} 字符")
+
+            # 连接事件处理器
+            speech_recognizer.recognized.connect(recognized_cb)
+            speech_recognizer.session_stopped.connect(stop_cb)
+            speech_recognizer.canceled.connect(stop_cb)
+
+            # 开始连续识别
+            print(f"  - 开始连续语音识别...")
+            speech_recognizer.start_continuous_recognition()
+
+            # 等待识别完成（最多等待20分钟，适应长视频）
+            import time
+            timeout = 1200  # 20分钟
+            start_time = time.time()
+
+            while not done and (time.time() - start_time) < timeout:
+                time.sleep(0.5)
+
+            speech_recognizer.stop_continuous_recognition()
+
+            if all_results:
+                full_text = ' '.join(all_results)
+                print(f"  - 转录成功，共 {len(full_text)} 个字符")
+                max_length = 30000  # 约30K字符
+                return {
+                    'text': full_text[:max_length],
+                    'language': '自动检测',
+                    'language_code': 'auto'
+                }
+            else:
+                print(f"  - 转录未产生结果")
+                return None
+
+        except Exception as e:
+            print(f"  - Azure转录失败: {e}")
+            return None
+        finally:
+            # 清理音频文件
+            try:
+                if audio_file and os.path.exists(audio_file):
+                    os.remove(audio_file)
+                    # 尝试删除临时目录
+                    temp_dir = os.path.dirname(audio_file)
+                    if os.path.exists(temp_dir):
+                        import shutil
+                        shutil.rmtree(temp_dir, ignore_errors=True)
+            except:
+                pass
+
+    def get_transcript_with_fallback(self, video_id):
+        """获取视频文本，优先使用字幕，失败则使用音频转录"""
+        # 首先尝试获取字幕
+        transcript_data = self.get_transcript(video_id)
+
+        if transcript_data:
+            return transcript_data
+
+        # 字幕获取失败，尝试下载音频并转录
+        print(f"  - 字幕不可用，尝试使用音频转录...")
+        audio_file = self.download_audio(video_id)
+
+        if audio_file:
+            transcript_data = self.transcribe_audio_with_azure(audio_file)
+            if transcript_data:
+                return transcript_data
+
+        print(f"  - 所有文本获取方法均失败")
+        return None
 
     def generate_summary(self, video_title, transcript_data):
         # 提取字幕文本和语言信息
@@ -262,9 +415,9 @@ class YouTubeMonitor:
 
         print(f"处理新视频: {video['title']}")
 
-        transcript_data = self.get_transcript(video_id)
+        transcript_data = self.get_transcript_with_fallback(video_id)
         if not transcript_data:
-            summary = "<p style='color: #999;'>无法获取视频字幕，无法生成总结。</p>"
+            summary = "<p style='color: #999;'>无法获取视频内容，无法生成总结。</p>"
         else:
             summary = self.generate_summary(video['title'], transcript_data)
 
@@ -340,4 +493,3 @@ if __name__ == '__main__':
 
     print("-" * 50)
     print("运行完成")
-
