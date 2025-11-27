@@ -2,7 +2,7 @@ name: YouTube Monitor
 
 on:
   schedule:
-    - cron: '23,48 * * * *'
+    - cron: '47 * * * *'
   workflow_dispatch:
 
 permissions:
