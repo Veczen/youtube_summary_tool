@@ -7,7 +7,6 @@ from youtube_transcript_api import YouTubeTranscriptApi
 import google.generativeai as genai
 import resend
 import azure.cognitiveservices.speech as speechsdk
-from proxy_manager import ProxyManager
 
 class YouTubeMonitor:
     def __init__(self):
@@ -27,21 +26,6 @@ class YouTubeMonitor:
             # 支持多个邮箱，用逗号分隔
             self.config['subscribers'] = [email.strip() for email in subscribers.split(',')]
 
-        # 初始化代理管理器
-        self.proxy_manager = ProxyManager()
-        self.use_proxy = os.getenv('USE_PROXY', 'true').lower() == 'true'
-
-        if self.use_proxy:
-            print("代理模式已启用，正在获取可用代理...")
-            # 获取并测试代理（最多测试20个，找到3个可用的）
-            self.proxy_manager.find_working_proxies(max_test=100, max_working=3)
-            if self.proxy_manager.working_proxies:
-                print(f"✓ 找到 {len(self.proxy_manager.working_proxies)} 个可用代理")
-            else:
-                print("⚠ 未找到可用代理，将使用直连")
-                self.use_proxy = False
-        else:
-            print("代理模式已禁用")
 
         self.youtube = build('youtube', 'v3', developerKey=os.getenv('YOUTUBE_API_KEY'))
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
@@ -97,46 +81,138 @@ class YouTubeMonitor:
             print(f"获取频道 {channel_id} 视频失败: {e}")
             return []
 
-    def get_transcript(self, video_id):
+    def get_captions_with_youtube_api(self, video_id):
+        """使用 YouTube Data API v3 获取字幕列表"""
         try:
+            # 获取字幕轨道列表
+            captions_response = self.youtube.captions().list(
+                part='snippet',
+                videoId=video_id
+            ).execute()
+
+            items = captions_response.get('items', [])
+
+            if not items:
+                print(f"  - YouTube API: 该视频没有字幕")
+                return None
+
+            # 优先选择策略：手动字幕 > 自动字幕，非英语 > 英语
+            manual_captions = [item for item in items if item['snippet']['trackKind'] != 'ASR']
+            auto_captions = [item for item in items if item['snippet']['trackKind'] == 'ASR']
+
+            selected_caption = None
+
+            # 策略1: 优先选择手动字幕
+            if manual_captions:
+                # 非英语手动字幕优先
+                non_english = [c for c in manual_captions if not c['snippet']['language'].startswith('en')]
+                if non_english:
+                    selected_caption = non_english[0]
+                    print(f"  - YouTube API: 找到原始语言手动字幕: {selected_caption['snippet']['name']} ({selected_caption['snippet']['language']})")
+                else:
+                    selected_caption = manual_captions[0]
+                    print(f"  - YouTube API: 使用手动字幕: {selected_caption['snippet']['name']} ({selected_caption['snippet']['language']})")
+
+            # 策略2: 使用自动生成字幕
+            elif auto_captions:
+                non_english = [c for c in auto_captions if not c['snippet']['language'].startswith('en')]
+                if non_english:
+                    selected_caption = non_english[0]
+                    print(f"  - YouTube API: 使用自动字幕: {selected_caption['snippet']['name']} ({selected_caption['snippet']['language']})")
+                else:
+                    selected_caption = auto_captions[0]
+                    print(f"  - YouTube API: 使用英语自动字幕: {selected_caption['snippet']['name']} ({selected_caption['snippet']['language']})")
+
+            if selected_caption:
+                caption_id = selected_caption['id']
+                language = selected_caption['snippet']['language']
+                language_name = selected_caption['snippet']['name']
+
+                # 注意: YouTube Data API v3 的 captions.download() 需要 OAuth 认证
+                # 使用 API Key 无法直接下载字幕内容
+                # 因此我们返回字幕信息，然后使用 youtube-transcript-api 下载
+                print(f"  - YouTube API: 找到字幕轨道 ID: {caption_id}")
+
+                return {
+                    'caption_id': caption_id,
+                    'language': language,
+                    'language_name': language_name,
+                    'track_kind': selected_caption['snippet']['trackKind']
+                }
+
+            return None
+
+        except Exception as e:
+            print(f"  - YouTube API 获取字幕失败: {e}")
+            return None
+
+    def get_transcript(self, video_id):
+        """获取视频字幕文本（混合策略：YouTube Data API + youtube-transcript-api）"""
+        try:
+            # 策略1: 先用 YouTube Data API 检查字幕可用性
+            print(f"  - 尝试使用 YouTube Data API 检查字幕...")
+            caption_info = self.get_captions_with_youtube_api(video_id)
+
+            # 策略2: 使用 youtube-transcript-api 下载字幕内容
+            # (因为 YouTube Data API 的 captions.download 需要 OAuth)
+            print(f"  - 使用 youtube-transcript-api 下载字幕内容...")
             api = YouTubeTranscriptApi()
             transcript_list = api.list(video_id)
 
             transcript_obj = None
 
-            # 策略1: 优先获取手动创建的字幕
-            try:
-                # 尝试获取手动创建的非英语字幕（通常是视频原始语言）
-                manual_transcripts = [t for t in transcript_list if not t.is_generated]
+            # 如果 YouTube Data API 提供了语言信息，优先使用该语言
+            if caption_info:
+                target_language = caption_info['language']
+                print(f"  - 尝试获取 {target_language} 语言字幕...")
 
-                if manual_transcripts:
-                    # 优先选择非英语的字幕
-                    non_english = [t for t in manual_transcripts if not t.language_code.startswith('en')]
-                    if non_english:
-                        transcript_obj = non_english[0]
-                        print(f"  - 找到原始语言手动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
-                    else:
-                        # 如果只有英语手动字幕，就用英语
-                        transcript_obj = manual_transcripts[0]
-                        print(f"  - 使用英语手动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
-            except:
-                pass
+                try:
+                    # 尝试直接获取指定语言的字幕
+                    for t in transcript_list:
+                        if t.language_code == target_language:
+                            transcript_obj = t
+                            print(f"  - ✓ 匹配到字幕: {t.language} ({t.language_code})")
+                            break
+                except:
+                    pass
 
-            # 策略2: 如果没有手动字幕，获取自动生成的字幕
+            # 如果上面没有找到，使用原来的智能选择策略
             if not transcript_obj:
-                available_transcripts = list(transcript_list)
-                if available_transcripts:
-                    # 同样优先选择非英语的自动字幕
-                    non_english_auto = [t for t in available_transcripts if not t.language_code.startswith('en')]
-                    if non_english_auto:
-                        transcript_obj = non_english_auto[0]
-                        print(f"  - 使用原始语言自动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
+                print(f"  - 使用智能选择策略...")
+
+                # 策略A: 优先获取手动创建的字幕
+                try:
+                    # 尝试获取手动创建的非英语字幕（通常是视频原始语言）
+                    manual_transcripts = [t for t in transcript_list if not t.is_generated]
+
+                    if manual_transcripts:
+                        # 优先选择非英语的字幕
+                        non_english = [t for t in manual_transcripts if not t.language_code.startswith('en')]
+                        if non_english:
+                            transcript_obj = non_english[0]
+                            print(f"  - 找到原始语言手动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
+                        else:
+                            # 如果只有英语手动字幕，就用英语
+                            transcript_obj = manual_transcripts[0]
+                            print(f"  - 使用英语手动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
+                except:
+                    pass
+
+                # 策略B: 如果没有手动字幕，获取自动生成的字幕
+                if not transcript_obj:
+                    available_transcripts = list(transcript_list)
+                    if available_transcripts:
+                        # 同样优先选择非英语的自动字幕
+                        non_english_auto = [t for t in available_transcripts if not t.language_code.startswith('en')]
+                        if non_english_auto:
+                            transcript_obj = non_english_auto[0]
+                            print(f"  - 使用原始语言自动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
+                        else:
+                            transcript_obj = available_transcripts[0]
+                            print(f"  - 使用自动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
                     else:
-                        transcript_obj = available_transcripts[0]
-                        print(f"  - 使用自动字幕: {transcript_obj.language} ({transcript_obj.language_code})")
-                else:
-                    print(f"  - 没有可用字幕")
-                    return None
+                        print(f"  - 没有可用字幕")
+                        return None
 
             # 获取字幕内容
             transcript = transcript_obj.fetch()
@@ -156,145 +232,84 @@ class YouTubeMonitor:
             return None
 
     def download_audio(self, video_id):
-        """使用第三方API下载YouTube视频的音频"""
+        """通过自建服务器下载YouTube视频的音频"""
         import requests
 
         try:
-            print(f"  - 使用第三方API下载音频...")
+            print(f"  - 通过服务器下载音频...")
 
             video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-            # 第一步：请求转换
-            api_url = "https://www.ytb2mp3.xyz/api/convert"
+            # 从环境变量获取服务器地址
+            server_url = os.getenv('AUDIO_SERVER_URL', 'http://your-server-ip:5000')
+            api_key = os.getenv('AUDIO_SERVER_API_KEY', '')  # 如果配置了 API Key
+
+            print(f"  - 服务器地址: {server_url}")
+            print(f"  - 请求下载: {video_url}")
+
+            # 准备请求
             headers = {
-                'accept': 'application/json, text/plain, */*',
-                'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
-                'content-type': 'application/json',
-                'origin': 'https://www.ytb2mp3.xyz',
-                'referer': 'https://www.ytb2mp3.xyz/',
-                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+                'Content-Type': 'application/json'
             }
+
+            # 如果配置了 API Key，添加到 headers
+            if api_key:
+                headers['X-API-Key'] = api_key
 
             payload = {
-                "url": video_url,
-                "format": "mp3"
+                "url": video_url
             }
 
-            # 获取代理
-            proxy = None
-            if self.use_proxy:
-                proxy = self.proxy_manager.get_random_proxy()
-                if proxy:
-                    print(f"  - 使用代理: {proxy.get('http', '')[:50]}...")
+            # 请求服务器下载
+            response = requests.post(
+                f"{server_url}/download",
+                json=payload,
+                headers=headers,
+                timeout=600,  # 10分钟超时
+                stream=True
+            )
 
-            print(f"  - 请求音频转换...")
-
-            # 尝试多次请求（如果使用代理，失败时换代理重试）
-            max_retries = 3 if self.use_proxy else 1
-
-            for attempt in range(max_retries):
+            if response.status_code != 200:
+                print(f"  - 服务器返回错误: {response.status_code}")
                 try:
-                    response = requests.post(
-                        api_url,
-                        json=payload,
-                        headers=headers,
-                        proxies=proxy,
-                        timeout=60
-                    )
+                    error_data = response.json()
+                    print(f"  - 错误信息: {error_data.get('error', 'Unknown error')}")
+                except:
+                    print(f"  - 响应内容: {response.text[:200]}")
+                return None
 
-                    if response.status_code != 200:
-                        print(f"  - API请求失败，状态码: {response.status_code}")
+            # 保存到临时文件
+            temp_dir = tempfile.mkdtemp()
+            audio_file = os.path.join(temp_dir, f"{video_id}.mp3")
 
-                        # 如果使用代理且失败，尝试换一个代理
-                        if self.use_proxy and attempt < max_retries - 1:
-                            print(f"  - 尝试更换代理重试 ({attempt + 1}/{max_retries})...")
-                            proxy = self.proxy_manager.get_random_proxy()
-                            continue
+            # 流式下载，显示进度
+            total_size = int(response.headers.get('content-length', 0))
+            downloaded = 0
 
-                        return None
+            print(f"  - 开始接收文件...")
+            with open(audio_file, 'wb') as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = (downloaded / total_size) * 100
+                            if int(percent) % 20 == 0:  # 每20%显示一次
+                                print(f"  - 下载进度: {percent:.0f}%")
 
-                    result = response.json()
+            actual_size = os.path.getsize(audio_file)
+            print(f"  - 音频下载成功: {audio_file}")
+            print(f"  - 文件大小: {actual_size / 1024 / 1024:.2f} MB")
 
-                    if result.get('status') != 'ok':
-                        print(f"  - 转换失败: {result.get('msg', 'Unknown error')}")
+            return audio_file
 
-                        # 如果使用代理且失败，尝试换一个代理
-                        if self.use_proxy and attempt < max_retries - 1:
-                            print(f"  - 尝试更换代理重试 ({attempt + 1}/{max_retries})...")
-                            proxy = self.proxy_manager.get_random_proxy()
-                            continue
+        except requests.exceptions.Timeout:
+            print(f"  - 请求超时（服务器处理时间过长）")
+            return None
 
-                        return None
-
-                    download_link = result.get('link')
-                    if not download_link:
-                        print(f"  - 未获取到下载链接")
-                        return None
-
-                    print(f"  - 获取到下载链接，准备下载...")
-                    print(f"  - 视频标题: {result.get('title', 'Unknown')}")
-                    print(f"  - 文件大小: {result.get('filesize', 0) / 1024 / 1024:.2f} MB")
-                    print(f"  - 时长: {result.get('duration', 0):.1f} 秒")
-
-                    # 第二步：下载音频文件（立即下载，避免链接过期）
-                    print(f"  - 开始下载音频...")
-                    audio_response = requests.get(
-                        download_link,
-                        headers=headers,
-                        proxies=proxy,
-                        timeout=300,
-                        stream=True
-                    )
-
-                    if audio_response.status_code != 200:
-                        print(f"  - 下载失败，状态码: {audio_response.status_code}")
-
-                        # 链接可能过期，重新请求转换
-                        if attempt < max_retries - 1:
-                            print(f"  - 链接可能过期，重新请求转换 ({attempt + 1}/{max_retries})...")
-                            import time
-                            time.sleep(2)
-
-                            # 换代理重试
-                            if self.use_proxy:
-                                proxy = self.proxy_manager.get_random_proxy()
-
-                            continue
-
-                        return None
-
-                    # 保存到临时文件
-                    temp_dir = tempfile.mkdtemp()
-                    audio_file = os.path.join(temp_dir, f"{video_id}.mp3")
-
-                    # 流式下载，显示进度
-                    total_size = int(audio_response.headers.get('content-length', 0))
-                    downloaded = 0
-
-                    with open(audio_file, 'wb') as f:
-                        for chunk in audio_response.iter_content(chunk_size=8192):
-                            if chunk:
-                                f.write(chunk)
-                                downloaded += len(chunk)
-                                if total_size > 0:
-                                    percent = (downloaded / total_size) * 100
-                                    if int(percent) % 20 == 0:  # 每20%显示一次
-                                        print(f"  - 下载进度: {percent:.0f}%")
-
-                    print(f"  - 音频下载成功: {audio_file}")
-                    print(f"  - 实际文件大小: {os.path.getsize(audio_file) / 1024 / 1024:.2f} MB")
-                    return audio_file
-
-                except requests.exceptions.RequestException as e:
-                    print(f"  - 请求异常: {e}")
-
-                    if self.use_proxy and attempt < max_retries - 1:
-                        print(f"  - 尝试更换代理重试 ({attempt + 1}/{max_retries})...")
-                        proxy = self.proxy_manager.get_random_proxy()
-                        continue
-
-                    return None
-
+        except requests.exceptions.ConnectionError:
+            print(f"  - 无法连接到服务器")
+            print(f"  - 请检查: 1) 服务器是否运行 2) AUDIO_SERVER_URL 是否正确")
             return None
 
         except Exception as e:
