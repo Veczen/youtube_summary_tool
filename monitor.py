@@ -34,7 +34,7 @@ class YouTubeMonitor:
         if self.use_proxy:
             print("代理模式已启用，正在获取可用代理...")
             # 获取并测试代理（最多测试20个，找到3个可用的）
-            self.proxy_manager.find_working_proxies(max_test=20, max_working=3)
+            self.proxy_manager.find_working_proxies(max_test=100, max_working=3)
             if self.proxy_manager.working_proxies:
                 print(f"✓ 找到 {len(self.proxy_manager.working_proxies)} 个可用代理")
             else:
