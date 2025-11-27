@@ -2,9 +2,11 @@ name: YouTube Monitor
 
 on:
   schedule:
-    # 每小时运行一次 (0分钟)
     - cron: '23,48 * * * *'
-  workflow_dispatch:  # 允许手动触发
+  workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   monitor:
@@ -15,6 +17,7 @@ jobs:
       uses: actions/checkout@v3
       with:
         token: ${{ secrets.GITHUB_TOKEN }}
+        persist-credentials: true   # <-- 必须添加这一行
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -39,13 +42,11 @@ jobs:
         AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
         EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
         EMAIL_SUBSCRIBERS: ${{ secrets.EMAIL_SUBSCRIBERS }}
-      run: |
-        python monitor.py
+      run: python monitor.py
 
     - name: Commit and push if changed
       run: |
         git config --local user.email "github-actions[bot]@users.noreply.github.com"
         git config --local user.name "github-actions[bot]"
         git add last_videos.json
-        git diff --quiet && git diff --staged --quiet || (git commit -m "Update last_videos.json" && git push)
-
+        git diff --quiet && git diff --staged --quiet || (git commit -m "Update last_videos.json" && git push origin HEAD:main)
