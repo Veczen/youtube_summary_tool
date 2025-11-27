@@ -185,6 +185,7 @@ class YouTubeMonitor:
             print(f"  - 视频标题: {result.get('title', 'Unknown')}")
             print(f"  - 文件大小: {result.get('filesize', 0) / 1024 / 1024:.2f} MB")
             print(f"  - 时长: {result.get('duration', 0):.1f} 秒")
+            print(download_link)
 
             # 第二步：下载音频文件
             audio_response = requests.get(download_link, timeout=300, stream=True)
