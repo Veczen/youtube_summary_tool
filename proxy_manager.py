@@ -104,7 +104,7 @@ class ProxyManager:
 
         return proxies
 
-    def test_proxy(self, proxy: Dict[str, str], test_url: str = "https://www.google.com", timeout: int = 5) -> bool:
+    def test_proxy(self, proxy: Dict[str, str], test_url: str = "https://www.youtube.com", timeout: int = 5) -> bool:
         """测试代理是否可用"""
         try:
             response = requests.get(
