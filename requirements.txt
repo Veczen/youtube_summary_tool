@@ -2,6 +2,6 @@ google-api-python-client
 google-generativeai
 youtube-transcript-api
 resend
-yt-dlp
+requests
 azure-cognitiveservices-speech
 

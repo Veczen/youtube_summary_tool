@@ -6,7 +6,6 @@ from googleapiclient.discovery import build
 from youtube_transcript_api import YouTubeTranscriptApi
 import google.generativeai as genai
 import resend
-import yt_dlp
 import azure.cognitiveservices.speech as speechsdk
 
 class YouTubeMonitor:
@@ -140,42 +139,88 @@ class YouTubeMonitor:
             return None
 
     def download_audio(self, video_id):
-        """下载YouTube视频的音频"""
+        """使用第三方API下载YouTube视频的音频"""
+        import requests
+
         try:
-            print(f"  - 尝试下载音频...")
-
-            # 创建临时目录
-            temp_dir = tempfile.mkdtemp()
-            output_path = os.path.join(temp_dir, f"{video_id}")
-
-            ydl_opts = {
-                'format': 'bestaudio/best',
-                'outtmpl': output_path,
-                'postprocessors': [{
-                    'key': 'FFmpegExtractAudio',
-                    'preferredcodec': 'wav',
-                    'preferredquality': '192',
-                }],
-                'quiet': True,
-                'no_warnings': True,
-            }
+            print(f"  - 使用第三方API下载音频...")
 
             video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([video_url])
+            # 第一步：请求转换
+            api_url = "https://www.ytb2mp3.xyz/api/convert"
+            headers = {
+                'accept': 'application/json, text/plain, */*',
+                'accept-language': 'zh-CN,zh;q=0.9,en;q=0.8',
+                'content-type': 'application/json',
+                'origin': 'https://www.ytb2mp3.xyz',
+                'referer': 'https://www.ytb2mp3.xyz/',
+                'user-agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/142.0.0.0 Safari/537.36'
+            }
 
-            audio_file = f"{output_path}.wav"
+            payload = {
+                "url": video_url,
+                "format": "mp3"
+            }
 
-            if os.path.exists(audio_file):
-                print(f"  - 音频下载成功: {audio_file}")
-                return audio_file
-            else:
-                print(f"  - 音频文件未找到")
+            print(f"  - 请求音频转换...")
+            response = requests.post(api_url, json=payload, headers=headers, timeout=60)
+
+            if response.status_code != 200:
+                print(f"  - API请求失败，状态码: {response.status_code}")
                 return None
 
+            result = response.json()
+
+            if result.get('status') != 'ok':
+                print(f"  - 转换失败: {result.get('msg', 'Unknown error')}")
+                return None
+
+            download_link = result.get('link')
+            if not download_link:
+                print(f"  - 未获取到下载链接")
+                return None
+
+            print(f"  - 获取到下载链接，准备下载...")
+            print(f"  - 视频标题: {result.get('title', 'Unknown')}")
+            print(f"  - 文件大小: {result.get('filesize', 0) / 1024 / 1024:.2f} MB")
+            print(f"  - 时长: {result.get('duration', 0):.1f} 秒")
+
+            # 第二步：下载音频文件
+            audio_response = requests.get(download_link, timeout=300, stream=True)
+
+            if audio_response.status_code != 200:
+                print(f"  - 下载失败，状态码: {audio_response.status_code}")
+                return None
+
+            # 保存到临时文件
+            temp_dir = tempfile.mkdtemp()
+            audio_file = os.path.join(temp_dir, f"{video_id}.mp3")
+
+            # 流式下载，显示进度
+            total_size = int(audio_response.headers.get('content-length', 0))
+            downloaded = 0
+
+            with open(audio_file, 'wb') as f:
+                for chunk in audio_response.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0:
+                            percent = (downloaded / total_size) * 100
+                            if int(percent) % 20 == 0:  # 每20%显示一次
+                                print(f"  - 下载进度: {percent:.0f}%")
+
+            print(f"  - 音频下载成功: {audio_file}")
+            return audio_file
+
+        except requests.exceptions.Timeout:
+            print(f"  - 下载超时")
+            return None
         except Exception as e:
             print(f"  - 下载音频失败: {e}")
+            import traceback
+            traceback.print_exc()
             return None
 
     def transcribe_audio_with_azure(self, audio_file):
@@ -190,6 +235,30 @@ class YouTubeMonitor:
             if not speech_key or not speech_region:
                 print(f"  - Azure Speech配置未找到")
                 return None
+
+            # 如果是 MP3 格式，需要转换为 WAV（Azure SDK 更好地支持 WAV）
+            if audio_file.endswith('.mp3'):
+                print(f"  - 检测到MP3格式，转换为WAV...")
+                wav_file = audio_file.replace('.mp3', '.wav')
+                try:
+                    import subprocess
+                    # 使用 ffmpeg 转换（GitHub Actions 已安装 ffmpeg）
+                    subprocess.run([
+                        'ffmpeg', '-i', audio_file,
+                        '-acodec', 'pcm_s16le',
+                        '-ar', '16000',
+                        '-ac', '1',
+                        wav_file
+                    ], check=True, capture_output=True)
+
+                    # 删除原 MP3 文件，使用 WAV
+                    os.remove(audio_file)
+                    audio_file = wav_file
+                    print(f"  - 转换完成: {wav_file}")
+                except Exception as e:
+                    print(f"  - 音频转换失败: {e}")
+                    # 如果转换失败，尝试直接使用 MP3
+                    pass
 
             # 配置语音识别
             speech_config = speechsdk.SpeechConfig(subscription=speech_key, region=speech_region)
@@ -259,14 +328,19 @@ class YouTubeMonitor:
             # 清理音频文件
             try:
                 if audio_file and os.path.exists(audio_file):
+                    print(f"  - 清理音频文件: {audio_file}")
                     os.remove(audio_file)
+                    print(f"  - ✓ 音频文件已删除")
+
                     # 尝试删除临时目录
                     temp_dir = os.path.dirname(audio_file)
-                    if os.path.exists(temp_dir):
+                    if os.path.exists(temp_dir) and temp_dir != os.getcwd():
                         import shutil
                         shutil.rmtree(temp_dir, ignore_errors=True)
-            except:
-                pass
+                        print(f"  - ✓ 临时目录已清理")
+            except Exception as cleanup_error:
+                print(f"  - ⚠ 清理文件时出错: {cleanup_error}")
+                # 继续执行，不影响主流程
 
     def get_transcript_with_fallback(self, video_id):
         """获取视频文本，优先使用字幕，失败则使用音频转录"""
