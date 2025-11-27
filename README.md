@@ -152,6 +152,9 @@ $env:EMAIL_SUBSCRIBERS="your-email@example.com"
 # 可选：Azure语音服务（仅在视频无字幕时使用）
 $env:AZURE_SPEECH_KEY="你的Azure密钥"
 $env:AZURE_SPEECH_REGION="eastus"
+
+# 可选：启用免费代理（默认启用，避免IP被封）
+$env:USE_PROXY="true"  # 设置为 "false" 禁用代理
 ```
 
 **Linux/Mac:**
@@ -221,6 +224,7 @@ Gemini AI生成中文总结
 - 💾 **状态持久化**: 记录到Git仓库，避免重复通知
 - 🔄 **自动去重**: 已处理的视频不会重复发送
 - 🛡️ **绕过IP限制**: 使用第三方API下载音频，无需担心GitHub Actions IP被封禁
+- 🔌 **智能代理**: 自动获取免费代理，避免IP被封（支持多个代理源，自动测试可用性）
 
 ## 📈 资源消耗估算
 
@@ -390,6 +394,45 @@ A:
 4. 选择分支（通常是 main）
 5. 点击绿色的 `Run workflow` 确认
 6. 等待几分钟查看运行结果
+</details>
+
+<details>
+<summary><b>Q: 代理功能如何工作？</b></summary>
+
+A:
+系统默认启用免费代理功能，自动从多个源获取可用代理：
+- ✅ **自动获取**: 从 proxy-list.download、free-proxy-list.net 等网站获取
+- ✅ **自动测试**: 测试代理可用性，只使用可用代理
+- ✅ **智能切换**: 请求失败时自动切换代理重试
+- ✅ **可禁用**: 设置环境变量 `USE_PROXY=false` 禁用代理
+
+**代理源：**
+1. proxy-list.download - HTTP 代理
+2. free-proxy-list.net - 免费代理列表
+3. geonode.com - 地理节点代理
+
+**注意**: 免费代理可能不稳定，系统会自动测试并选择可用的代理。
+</details>
+
+<details>
+<summary><b>Q: 如何禁用代理？</b></summary>
+
+A:
+如果不需要代理功能，可以在环境变量中设置：
+
+**本地测试：**
+```powershell
+$env:USE_PROXY="false"
+```
+
+**GitHub Actions：**
+在 `.github/workflows/monitor.yml` 中添加环境变量：
+```yaml
+env:
+  USE_PROXY: "false"
+```
+
+禁用后，所有请求将直连，不使用代理。
 </details>
 
 ## 📝 项目文件说明

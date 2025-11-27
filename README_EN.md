@@ -141,6 +141,13 @@ $env:GEMINI_API_KEY="your_api_key"
 $env:RESEND_API_KEY="your_api_key"
 $env:EMAIL_FROM="YouTube Monitor <onboarding@resend.dev>"
 $env:EMAIL_SUBSCRIBERS="your-email@example.com"
+
+# Optional: Azure Speech Service
+$env:AZURE_SPEECH_KEY="your_azure_key"
+$env:AZURE_SPEECH_REGION="eastus"
+
+# Optional: Enable free proxy (enabled by default to avoid IP blocking)
+$env:USE_PROXY="true"  # Set to "false" to disable proxy
 ```
 
 **Linux/Mac:**

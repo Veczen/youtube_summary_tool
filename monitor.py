@@ -7,6 +7,7 @@ from youtube_transcript_api import YouTubeTranscriptApi
 import google.generativeai as genai
 import resend
 import azure.cognitiveservices.speech as speechsdk
+from proxy_manager import ProxyManager
 
 class YouTubeMonitor:
     def __init__(self):
@@ -25,6 +26,22 @@ class YouTubeMonitor:
         if subscribers:
             # 支持多个邮箱，用逗号分隔
             self.config['subscribers'] = [email.strip() for email in subscribers.split(',')]
+
+        # 初始化代理管理器
+        self.proxy_manager = ProxyManager()
+        self.use_proxy = os.getenv('USE_PROXY', 'true').lower() == 'true'
+
+        if self.use_proxy:
+            print("代理模式已启用，正在获取可用代理...")
+            # 获取并测试代理（最多测试20个，找到3个可用的）
+            self.proxy_manager.find_working_proxies(max_test=20, max_working=3)
+            if self.proxy_manager.working_proxies:
+                print(f"✓ 找到 {len(self.proxy_manager.working_proxies)} 个可用代理")
+            else:
+                print("⚠ 未找到可用代理，将使用直连")
+                self.use_proxy = False
+        else:
+            print("代理模式已禁用")
 
         self.youtube = build('youtube', 'v3', developerKey=os.getenv('YOUTUBE_API_KEY'))
         genai.configure(api_key=os.getenv('GEMINI_API_KEY'))
@@ -163,61 +180,123 @@ class YouTubeMonitor:
                 "format": "mp3"
             }
 
+            # 获取代理
+            proxy = None
+            if self.use_proxy:
+                proxy = self.proxy_manager.get_random_proxy()
+                if proxy:
+                    print(f"  - 使用代理: {proxy.get('http', '')[:50]}...")
+
             print(f"  - 请求音频转换...")
-            response = requests.post(api_url, json=payload, headers=headers, timeout=60)
 
-            if response.status_code != 200:
-                print(f"  - API请求失败，状态码: {response.status_code}")
-                return None
+            # 尝试多次请求（如果使用代理，失败时换代理重试）
+            max_retries = 3 if self.use_proxy else 1
 
-            result = response.json()
+            for attempt in range(max_retries):
+                try:
+                    response = requests.post(
+                        api_url,
+                        json=payload,
+                        headers=headers,
+                        proxies=proxy,
+                        timeout=60
+                    )
 
-            if result.get('status') != 'ok':
-                print(f"  - 转换失败: {result.get('msg', 'Unknown error')}")
-                return None
+                    if response.status_code != 200:
+                        print(f"  - API请求失败，状态码: {response.status_code}")
 
-            download_link = result.get('link')
-            if not download_link:
-                print(f"  - 未获取到下载链接")
-                return None
+                        # 如果使用代理且失败，尝试换一个代理
+                        if self.use_proxy and attempt < max_retries - 1:
+                            print(f"  - 尝试更换代理重试 ({attempt + 1}/{max_retries})...")
+                            proxy = self.proxy_manager.get_random_proxy()
+                            continue
 
-            print(f"  - 获取到下载链接，准备下载...")
-            print(f"  - 视频标题: {result.get('title', 'Unknown')}")
-            print(f"  - 文件大小: {result.get('filesize', 0) / 1024 / 1024:.2f} MB")
-            print(f"  - 时长: {result.get('duration', 0):.1f} 秒")
-            print(download_link)
+                        return None
 
-            # 第二步：下载音频文件
-            audio_response = requests.get(download_link, timeout=300, stream=True)
+                    result = response.json()
 
-            if audio_response.status_code != 200:
-                print(f"  - 下载失败，状态码: {audio_response.status_code}")
-                return None
+                    if result.get('status') != 'ok':
+                        print(f"  - 转换失败: {result.get('msg', 'Unknown error')}")
 
-            # 保存到临时文件
-            temp_dir = tempfile.mkdtemp()
-            audio_file = os.path.join(temp_dir, f"{video_id}.mp3")
+                        # 如果使用代理且失败，尝试换一个代理
+                        if self.use_proxy and attempt < max_retries - 1:
+                            print(f"  - 尝试更换代理重试 ({attempt + 1}/{max_retries})...")
+                            proxy = self.proxy_manager.get_random_proxy()
+                            continue
 
-            # 流式下载，显示进度
-            total_size = int(audio_response.headers.get('content-length', 0))
-            downloaded = 0
+                        return None
 
-            with open(audio_file, 'wb') as f:
-                for chunk in audio_response.iter_content(chunk_size=8192):
-                    if chunk:
-                        f.write(chunk)
-                        downloaded += len(chunk)
-                        if total_size > 0:
-                            percent = (downloaded / total_size) * 100
-                            if int(percent) % 20 == 0:  # 每20%显示一次
-                                print(f"  - 下载进度: {percent:.0f}%")
+                    download_link = result.get('link')
+                    if not download_link:
+                        print(f"  - 未获取到下载链接")
+                        return None
 
-            print(f"  - 音频下载成功: {audio_file}")
-            return audio_file
+                    print(f"  - 获取到下载链接，准备下载...")
+                    print(f"  - 视频标题: {result.get('title', 'Unknown')}")
+                    print(f"  - 文件大小: {result.get('filesize', 0) / 1024 / 1024:.2f} MB")
+                    print(f"  - 时长: {result.get('duration', 0):.1f} 秒")
 
-        except requests.exceptions.Timeout:
-            print(f"  - 下载超时")
+                    # 第二步：下载音频文件（立即下载，避免链接过期）
+                    print(f"  - 开始下载音频...")
+                    audio_response = requests.get(
+                        download_link,
+                        headers=headers,
+                        proxies=proxy,
+                        timeout=300,
+                        stream=True
+                    )
+
+                    if audio_response.status_code != 200:
+                        print(f"  - 下载失败，状态码: {audio_response.status_code}")
+
+                        # 链接可能过期，重新请求转换
+                        if attempt < max_retries - 1:
+                            print(f"  - 链接可能过期，重新请求转换 ({attempt + 1}/{max_retries})...")
+                            import time
+                            time.sleep(2)
+
+                            # 换代理重试
+                            if self.use_proxy:
+                                proxy = self.proxy_manager.get_random_proxy()
+
+                            continue
+
+                        return None
+
+                    # 保存到临时文件
+                    temp_dir = tempfile.mkdtemp()
+                    audio_file = os.path.join(temp_dir, f"{video_id}.mp3")
+
+                    # 流式下载，显示进度
+                    total_size = int(audio_response.headers.get('content-length', 0))
+                    downloaded = 0
+
+                    with open(audio_file, 'wb') as f:
+                        for chunk in audio_response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+                                downloaded += len(chunk)
+                                if total_size > 0:
+                                    percent = (downloaded / total_size) * 100
+                                    if int(percent) % 20 == 0:  # 每20%显示一次
+                                        print(f"  - 下载进度: {percent:.0f}%")
+
+                    print(f"  - 音频下载成功: {audio_file}")
+                    print(f"  - 实际文件大小: {os.path.getsize(audio_file) / 1024 / 1024:.2f} MB")
+                    return audio_file
+
+                except requests.exceptions.RequestException as e:
+                    print(f"  - 请求异常: {e}")
+
+                    if self.use_proxy and attempt < max_retries - 1:
+                        print(f"  - 尝试更换代理重试 ({attempt + 1}/{max_retries})...")
+                        proxy = self.proxy_manager.get_random_proxy()
+                        continue
+
+                    return None
+
             return None
+
         except Exception as e:
             print(f"  - 下载音频失败: {e}")
             import traceback
