@@ -42,8 +42,7 @@ jobs:
         AZURE_SPEECH_REGION: ${{ secrets.AZURE_SPEECH_REGION }}
         EMAIL_FROM: ${{ secrets.EMAIL_FROM }}
         EMAIL_SUBSCRIBERS: ${{ secrets.EMAIL_SUBSCRIBERS }}
-        AUDIO_SERVER_URL: ${{ secrets.AUDIO_SERVER_URL }}
-        AUDIO_SERVER_API_KEY: ${{ secrets.AUDIO_SERVER_API_KEY }}
+
       run: python monitor.py
 
     - name: Commit and push if changed
