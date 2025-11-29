@@ -298,9 +298,9 @@ class YouTubeMonitor:
                 "html": html_content,
             }
 
-            # response = resend.Emails.send(params)
-            print(f"邮件发送成功")
-            # print(f"邮件发送成功: {subject} (ID: {response['id']})")
+            response = resend.Emails.send(params)
+
+            print(f"邮件发送成功: {subject} (ID: {response['id']})")
             return True
         except Exception as e:
             print(f"邮件发送失败: {e}")
@@ -374,7 +374,7 @@ Xiangzhen
 
                 subject = f"[YouTube总结] {channel_name} - {video.get('title', '')}"
                 if self.send_email(subject, email_content):
-                    print(f"  ✓ 邮件发送成功",email_content)
+                    print(f"  ✓ 邮件发送成功")
                     # 从待处理列表中移除
                     if video_id in self.pending_jobs:
                         del self.pending_jobs[video_id]
