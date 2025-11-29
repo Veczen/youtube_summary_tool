@@ -1,15 +1,18 @@
 import json
 import os
 import requests
+import logging
 from datetime import datetime, timedelta, timezone
 from googleapiclient.discovery import build
 import google.generativeai as genai
 import resend
 
+
 class YouTubeMonitor:
     def __init__(self):
         self.config = self.load_json('config.json')
         self.last_videos = self.load_json('last_videos.json')
+        self.pending_jobs = self.load_json('pending_jobs.json')  # 新增：跟踪待处理任务
 
         # 从环境变量覆盖邮件配置（如果存在）
         email_from = os.getenv('EMAIL_FROM')
@@ -76,61 +79,110 @@ class YouTubeMonitor:
             print(f"获取频道 {channel_id} 视频失败: {e}")
             return []
 
-    def request_transcript_from_server(self, video_id):
-        """请求音频服务器返回转录文本"""
+    def check_transcription_status(self, video_id):
+        """检查转录任务是否已完成，返回转录文本或 None"""
         if not self.audio_server_url:
-            print("  - 未配置 AUDIO_SERVER_URL，无法获取转录")
             return None
 
-        video_url = f"https://www.youtube.com/watch?v={video_id}"
-        endpoint = self.audio_server_url.rstrip('/') + '/transcribe'
+        base_url = self.audio_server_url.rstrip('/')
         headers = {
             'Content-Type': 'application/json'
         }
         if self.audio_server_api_key:
             headers['X-API-Key'] = self.audio_server_api_key
 
-        payload = {
-            'url': video_url
-        }
-
+        query_url = f"{base_url}/transcribe/by-video/{video_id}"
         try:
-            print("  - 请求音频服务器进行转录...")
-            response = requests.post(endpoint, json=payload, headers=headers, timeout=2000)
-            if response.status_code != 200:
-                print(f"  - 音频服务器返回错误: {response.status_code}")
-                try:
-                    error_payload = response.json()
-                    print(f"  - 错误信息: {error_payload.get('error', 'unknown error')}")
-                except ValueError:
-                    print(f"  - 响应内容: {response.text[:200]}")
-                return None
+            response = requests.get(query_url, headers=headers, timeout=15)
+            if response.status_code == 200:
+                data = response.json()
+                state = data.get('state')
 
-            data = response.json()
-            if not data.get('success'):
-                print(f"  - 音频服务器未能完成转录: {data.get('error', 'unknown error')}")
+                if state == 'done':
+                    text = data.get('text', '').strip()
+                    if text:
+                        print(f"  ✓ 视频 {video_id} 转录已完成")
+                        return {
+                            'text': text,
+                            'language': data.get('language', 'auto'),
+                            'language_code': data.get('language_code', 'auto'),
+                            'duration': data.get('duration_seconds')
+                        }
+                    else:
+                        print(f"  - 视频 {video_id} 转录文本为空")
+                        return None
+                elif state == 'pending':
+                    print(f"  - 视频 {video_id} 转录任务等待中...")
+                    return None
+                elif state == 'running':
+                    print(f"  - 视频 {video_id} 转录任务运行中...")
+                    return None
+                elif state == 'error':
+                    error_msg = data.get('error', '未知错误')
+                    print(f"  ✗ 视频 {video_id} 转录失败: {error_msg}")
+                    return None
+            elif response.status_code == 404:
+                # 任务不存在
+                print(f"  - 视频 {video_id} 的转录任务不存在")
                 return None
-
-            transcript_text = data.get('text', '').strip()
-            if not transcript_text:
-                print("  - 音频服务器返回的文本为空")
+            else:
+                print(f"  - 查询转录状态失败: HTTP {response.status_code}")
                 return None
-
-            return {
-                'text': transcript_text,
-                'language': data.get('language', 'auto'),
-                'language_code': data.get('language_code', 'auto'),
-                'duration': data.get('duration_seconds')
-            }
         except requests.exceptions.Timeout:
-            print("  - 请求音频服务器超时")
+            print(f"  - 查询转录状态超时")
             return None
         except requests.exceptions.ConnectionError:
-            print("  - 无法连接音频服务器")
+            print(f"  - 无法连接到转录服务器 {base_url}")
             return None
         except Exception as e:
-            print(f"  - 请求音频服务器失败: {e}")
+            print(f"  - 查询转录状态异常: {type(e).__name__}: {e}")
             return None
+
+    def submit_transcription_job(self, video_id, video_url):
+        """提交转录任务（不等待完成）"""
+        if not self.audio_server_url:
+            print("  - 未配置 AUDIO_SERVER_URL，无法提交转录任务")
+            return False
+
+        base_url = self.audio_server_url.rstrip('/')
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        if self.audio_server_api_key:
+            headers['X-API-Key'] = self.audio_server_api_key
+
+        submit_url = f"{base_url}/transcribe"
+        payload = {'url': video_url}
+
+        try:
+            print(f"  - 提交转录任务: {video_id}")
+            # 提交任务只是加入队列，应该很快返回，但考虑到网络延迟和可能的并发，设置较长超时
+            response = requests.post(submit_url, json=payload, headers=headers, timeout=60)
+
+            if response.status_code in (200, 202):
+                data = response.json()
+                job_id = data.get('job_id')
+                state = data.get('state')
+                queue_size = data.get('queue_size', '?')
+                print(f"  ✓ 任务已提交 (job_id={job_id}, state={state}, 队列={queue_size})")
+                return True
+            else:
+                print(f"  - 提交转录任务失败: HTTP {response.status_code}")
+                try:
+                    error_data = response.json()
+                    print(f"  - 错误详情: {error_data.get('error', '未知错误')}")
+                except:
+                    pass
+                return False
+        except requests.exceptions.Timeout:
+            print(f"  - 提交超时（60秒），但任务可能已加入队列")
+            return True  # 返回 True，允许继续处理其他视频
+        except requests.exceptions.ConnectionError:
+            print(f"  - 无法连接到服务器 {base_url}")
+            return False
+        except Exception as e:
+            print(f"  - 提交转录任务异常: {type(e).__name__}: {e}")
+            return False
 
     def generate_summary(self, video_title, transcript_data):
         # 提取字幕文本和语言信息
@@ -246,86 +298,168 @@ class YouTubeMonitor:
                 "html": html_content,
             }
 
-            response = resend.Emails.send(params)
-            print(f"邮件发送成功: {subject} (ID: {response['id']})")
+            # response = resend.Emails.send(params)
+            print(f"邮件发送成功")
+            # print(f"邮件发送成功: {subject} (ID: {response['id']})")
             return True
         except Exception as e:
             print(f"邮件发送失败: {e}")
             return False
 
-    def process_video(self, channel_name, video):
+    def process_video(self, channel_name, video, is_new=False):
+        """
+        处理视频：
+        - is_new=False: 检查已提交的转录任务是否完成，完成则生成总结并发送邮件
+        - is_new=True: 提交新的转录任务（不等待）
+        """
         video_id = video['video_id']
         video_url = f"https://www.youtube.com/watch?v={video_id}"
 
-        print(f"处理新视频: {video['title']}")
+        if is_new:
+            # 新视频：提交转录任务
+            print(f"发现新视频: {video['title']}")
+            success = self.submit_transcription_job(video_id, video_url)
 
-        transcript_data = self.request_transcript_from_server(video_id)
-        if not transcript_data:
-            print("<p style='color: #999;'>无法获取视频内容，无法生成总结。</p>")
+            if success:
+                # 添加到待处理列表（保存完整的视频信息）
+                self.pending_jobs[video_id] = {
+                    'video_url': video_url,
+                    'video_title': video.get('title', ''),
+                    'channel_name': channel_name,
+                    'published_at': video.get('published_at', ''),
+                    'description': video.get('description', ''),
+                    'submitted_at': datetime.now().isoformat()
+                }
+                print(f"  ✓ 视频已加入待处理队列")
+            else:
+                print(f"  ✗ 提交转录任务失败，将在下次重试")
         else:
-            summary = self.generate_summary(video['title'], transcript_data)
+            # 旧视频：检查转录是否完成
+            print(f"检查待处理视频: {video.get('title', video_id)}")
+            transcript_data = self.check_transcription_status(video_id)
 
-            email_content = f"""
-        <h1 style="color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px;">
-        【{channel_name}】发布新视频
-        </h1>
-        
-        <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
-        <p><strong>视频标题：</strong> {video['title']}</p>
-        <p><strong>发布时间：</strong> {video['published_at']}</p>
-        <p><strong>视频链接：</strong> <a href="{video_url}" style="color: #3498db;">{video_url}</a></p>
-        </div>
-        
-        <hr style="border: 1px solid #ddd; margin: 30px 0;">
-        
-        <h2 style="color: #34495e;">内容总结</h2>
-        
-        <div style="margin-top: 20px;">
-        {summary}
-        </div>
-        
-        <hr style="border: 1px solid #ddd; margin: 30px 0;">
-        
-        <p style="color: #999; font-size: 12px; text-align: center;">
-        本邮件由YouTube监控系统自动发送
-        </p>
-        <p style="color: #999; font-size: 12px; text-align: center;">
-        Xiangzhen 
-        </p>
-        """
+            if transcript_data:
+                # 转录完成，生成总结并发送邮件
+                print(f"  ✓ 转录已完成，开始生成总结...")
+                summary = self.generate_summary(video.get('title', ''), transcript_data)
 
-            subject = f"[YouTube总结] {channel_name} - {video['title']}"
-            self.send_email(subject, email_content)
+                email_content = f"""
+<h1 style="color: #2c3e50; border-bottom: 3px solid #e74c3c; padding-bottom: 10px;">
+    【{channel_name}】发布新视频
+</h1>
+        
+<div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
+<p><strong>视频标题：</strong> {video.get('title', '')}</p>
+<p><strong>发布时间：</strong> {video.get('published_at', '')}</p>
+<p><strong>视频链接：</strong> <a href="{video_url}" style="color: #3498db;">{video_url}</a></p>
+</div>
+        
+<hr style="border: 1px solid #ddd; margin: 30px 0;">
+        
+<h2 style="color: #34495e;">内容总结</h2>
+        
+<div style="margin-top: 20px;">
+{summary}
+</div>
+        
+<hr style="border: 1px solid #ddd; margin: 30px 0;">
+        
+<p style="color: #999; font-size: 12px; text-align: center;">
+本邮件由YouTube监控系统自动发送
+</p>
+<p style="color: #999; font-size: 12px; text-align: center;">
+Xiangzhen 
+</p>
+"""
+
+                subject = f"[YouTube总结] {channel_name} - {video.get('title', '')}"
+                if self.send_email(subject, email_content):
+                    print(f"  ✓ 邮件发送成功",email_content)
+                    # 从待处理列表中移除
+                    if video_id in self.pending_jobs:
+                        del self.pending_jobs[video_id]
+
+                    # 标记为已处理
+                    channel_id = self.get_channel_id_by_name(channel_name)
+                    if channel_id:
+                        if channel_id not in self.last_videos:
+                            self.last_videos[channel_id] = []
+                        if video_id not in self.last_videos[channel_id]:
+                            self.last_videos[channel_id].append(video_id)
+                else:
+                    print(f"  ✗ 邮件发送失败")
+            else:
+                # 转录未完成，保持在待处理列表中
+                print(f"  - 转录尚未完成，保持在待处理队列中")
+
+    def get_channel_id_by_name(self, channel_name):
+        """根据频道名称获取频道ID"""
+        for channel in self.config.get('channels', []):
+            if channel.get('name') == channel_name:
+                return channel.get('id')
+        return None
 
     def run(self):
         print(f"开始检查更新 - {datetime.now()}")
 
-        all_new_videos = {}
+        # 第一步：处理待处理队列中的视频（检查转录是否完成）
+        if self.pending_jobs:
+            print(f"\n检查待处理队列 ({len(self.pending_jobs)} 个视频)")
+            print("-" * 50)
+
+            # 复制一份待处理列表（避免在迭代时修改字典）
+            pending_items = list(self.pending_jobs.items())
+
+            for video_id, job_info in pending_items:
+                video = {
+                    'video_id': video_id,
+                    'title': job_info.get('video_title', ''),  # 使用 video_title
+                    'published_at': job_info.get('published_at', ''),
+                    'description': job_info.get('description', ''),  # 添加 description
+                    'video_url': job_info.get('video_url', '')
+                }
+                channel_name = job_info.get('channel_name', '未知频道')
+
+                # 调试日志
+                print(f"  [调试] video_id={video_id}")
+                print(f"  [调试] title={video.get('title', 'N/A')}")
+                print(f"  [调试] published_at={video.get('published_at', 'N/A')}")
+                print(f"  [调试] channel_name={channel_name}")
+
+                self.process_video(channel_name, video, is_new=False)
+
+            print("-" * 50)
+
+        # 第二步：检查各频道是否有新视频
+        print(f"\n检查新视频更新")
+        print("-" * 50)
 
         for channel in self.config['channels']:
             channel_id = channel['id']
             channel_name = channel['name']
 
-            print(f"检查频道: {channel_name}")
+            print(f"\n检查频道: {channel_name}")
             new_videos = self.get_channel_uploads(channel_id)
 
             if new_videos:
                 print(f"发现 {len(new_videos)} 个新视频")
-                all_new_videos[channel_id] = new_videos
 
                 for video in new_videos:
-                    self.process_video(channel_name, video)
+                    # 提交新的转录任务
+                    self.process_video(channel_name, video, is_new=True)
 
+                    # 立即标记为已处理（避免重复提交）
                     if channel_id not in self.last_videos:
                         self.last_videos[channel_id] = []
-                    self.last_videos[channel_id].append(video['video_id'])
+                    if video['video_id'] not in self.last_videos[channel_id]:
+                        self.last_videos[channel_id].append(video['video_id'])
             else:
                 print("无新视频")
 
-        if all_new_videos:
-            self.save_json('last_videos.json', self.last_videos)
-            print("状态已保存")
-
+        # 第三步：保存状态
+        self.save_json('last_videos.json', self.last_videos)
+        self.save_json('pending_jobs.json', self.pending_jobs)
+        print("\n状态已保存")
         print("检查完成")
 
     def get_video_privacy_status(self, video_ids):

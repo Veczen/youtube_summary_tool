@@ -1,25 +1,25 @@
 {
   "channels": [
-    {
-      "id": "UCFhJ8ZFg9W4kLwFTBBNIjOw",
-      "name": "娜娜说美股"
-    },
-    {
-      "id": "UCbI_tAz8drA95Qua5lMHiSg",
-      "name": "幂笈"
-    },
-    {
-      "id": "UCWgWYZjNo42YLvx6Arb6mcg",
-      "name": "美股Alpha姐"
-    },
-    {
-      "id": "UC2I5em6UyBpQiO-8ZW0nV3w",
-      "name": "阳光财经"
-    },
-    {
-      "id": "UC1ZHl6yHVQh579wq89_PoEA",
-      "name": "美股研究社"
-    }
-  ],
-  "check_hours": 4
+   {
+       "id": "UCFhJ8ZFg9W4kLwFTBBNIjOw",
+       "name": "娜娜说美股"
+   },
+   {
+       "id": "UCbI_tAz8drA95Qua5lMHiSg",
+       "name": "幂笈"
+   },
+   {
+       "id": "UCWgWYZjNo42YLvx6Arb6mcg",
+       "name": "美股Alpha姐"
+   },
+   {
+       "id": "UC2I5em6UyBpQiO-8ZW0nV3w",
+       "name": "阳光财经"
+   },
+   {
+       "id": "UC1ZHl6yHVQh579wq89_PoEA",
+       "name": "美股研究社"
+   }
+],
+  "check_hours": 2
 }
