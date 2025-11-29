@@ -5,6 +5,10 @@ on:
     - cron: '47 * * * *'
   workflow_dispatch:
 
+concurrency:
+  group: youtube-monitor
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
