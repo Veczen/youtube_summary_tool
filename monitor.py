@@ -84,6 +84,13 @@ class YouTubeMonitor:
         if not self.audio_server_url:
             return False
 
+        # Validate video_id to prevent path traversal attacks
+        # YouTube video IDs are 11 characters, alphanumeric with - and _
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]{11}$', video_id):
+            print(f"  - 无效的视频ID格式: {video_id}")
+            return False
+
         base_url = self.audio_server_url.rstrip('/')
         headers = {
             'Content-Type': 'application/json'
@@ -98,8 +105,10 @@ class YouTubeMonitor:
                 print(f"  ✓ 音频文件已删除: {video_id}")
                 return True
             elif response.status_code == 404:
+                # 文件不存在或已被删除，这对于清理操作来说是可接受的
+                # 可能的原因：文件已被手动删除，或从未创建成功
                 print(f"  - 音频文件不存在或已删除: {video_id}")
-                return True  # 文件不存在也视为成功
+                return True
             else:
                 print(f"  - 删除音频文件失败: HTTP {response.status_code}")
                 return False
