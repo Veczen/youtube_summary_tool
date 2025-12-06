@@ -104,13 +104,13 @@ class YouTubeMonitor:
                 print(f"  - 删除音频文件失败: HTTP {response.status_code}")
                 return False
         except requests.exceptions.Timeout:
-            print(f"  - 删除音频文件超时")
+            print(f"  - 删除音频文件超时: {video_id}")
             return False
         except requests.exceptions.ConnectionError:
-            print(f"  - 无法连接到服务器删除音频文件")
+            print(f"  - 无法连接到服务器删除音频文件: {video_id}")
             return False
         except Exception as e:
-            print(f"  - 删除音频文件异常: {type(e).__name__}: {e}")
+            print(f"  - 删除音频文件异常 ({video_id}): {type(e).__name__}: {e}")
             return False
 
     def check_transcription_status(self, video_id):
