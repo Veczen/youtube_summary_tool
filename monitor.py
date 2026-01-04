@@ -79,6 +79,49 @@ class YouTubeMonitor:
             print(f"获取频道 {channel_id} 视频失败: {e}")
             return []
 
+    def delete_audio_file(self, video_id):
+        """删除音频文件"""
+        if not self.audio_server_url:
+            return False
+
+        # Validate video_id to prevent path traversal attacks
+        # YouTube video IDs are 11 characters, alphanumeric with - and _
+        import re
+        if not re.match(r'^[a-zA-Z0-9_-]{11}$', video_id):
+            print(f"  - 无效的视频ID格式: {video_id}")
+            return False
+
+        base_url = self.audio_server_url.rstrip('/')
+        headers = {
+            'Content-Type': 'application/json'
+        }
+        if self.audio_server_api_key:
+            headers['X-API-Key'] = self.audio_server_api_key
+
+        delete_url = f"{base_url}/transcribe/by-video/{video_id}"
+        try:
+            response = requests.delete(delete_url, headers=headers, timeout=15)
+            if response.status_code in (200, 204):
+                print(f"  ✓ 音频文件已删除: {video_id}")
+                return True
+            elif response.status_code == 404:
+                # 文件不存在或已被删除，这对于清理操作来说是可接受的
+                # 可能的原因：文件已被手动删除，或从未创建成功
+                print(f"  - 音频文件不存在或已删除: {video_id}")
+                return True
+            else:
+                print(f"  - 删除音频文件失败: HTTP {response.status_code}")
+                return False
+        except requests.exceptions.Timeout:
+            print(f"  - 删除音频文件超时: {video_id}")
+            return False
+        except requests.exceptions.ConnectionError:
+            print(f"  - 无法连接到服务器删除音频文件: {video_id}")
+            return False
+        except Exception as e:
+            print(f"  - 删除音频文件异常 ({video_id}): {type(e).__name__}: {e}")
+            return False
+
     def check_transcription_status(self, video_id):
         """检查转录任务是否已完成，返回转录文本或 None"""
         if not self.audio_server_url:
@@ -375,6 +418,10 @@ Xiangzhen
                 subject = f"[YouTube总结] {channel_name} - {video.get('title', '')}"
                 if self.send_email(subject, email_content):
                     print(f"  ✓ 邮件发送成功")
+                    
+                    # 删除音频文件
+                    self.delete_audio_file(video_id)
+                    
                     # 从待处理列表中移除
                     if video_id in self.pending_jobs:
                         del self.pending_jobs[video_id]
@@ -389,7 +436,7 @@ Xiangzhen
                 else:
                     print(f"  ✗ 邮件发送失败")
             else:
-                # 转录未完成，保持在待处理列表中
+                # 转录未完成或失败，保持在待处理列表中，不发送邮件
                 print(f"  - 转录尚未完成，保持在待处理队列中")
 
     def get_channel_id_by_name(self, channel_name):
